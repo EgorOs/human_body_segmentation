@@ -1,0 +1,15 @@
+.pytest_cache
+.ipynb_checkpoints
+.virtual_documents
+.mypy_cache
+
+# DS_Store (MacOS)
+.DS_Store
+
+__pycache__
+.idea
+lightning_logs
+logs
+*.pth
+
+.data_temp
