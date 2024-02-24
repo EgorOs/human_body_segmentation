@@ -18,6 +18,8 @@ torchvision = ">=0.15.0"
 torchmetrics = ">=1.1.1"
 tensorboard = ">=2.14.0"
 segmentation-models-pytorch = ">=0.3.3"
+jpeg4py = "0.1.4"
+imageio = "2.34.0"
 
 [tool.poetry.group.dev.dependencies]
 pre-commit = ">=3.2.1"

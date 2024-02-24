@@ -7,7 +7,7 @@ from lightning import LightningDataModule
 from torch.utils.data import DataLoader
 
 from src.config import DataConfig
-from src.dataset import VOCSegmentationBase
+from src.dataset import VOCHumanBodyPart, VOCSegmentationBase
 from src.transform import get_train_transforms, get_valid_transforms
 
 
@@ -36,27 +36,43 @@ class HumanBodyDataModule(LightningDataModule):  # noqa: WPS214
         if not self.initialized:
             self.prepare_data()
             self.setup('test')
-        return self.data_test.class_to_idx
+        if self.data_test is None:
+            raise ValueError('Test dataset needs to be initialized.')
+        return self.data_test.class2idx
 
     @property
     def idx_to_class(self) -> Dict[int, str]:
         return {idx: cl for cl, idx in self.class_to_idx.items()}
 
-    def prepare_data(self):
+    def prepare_data(self) -> None:
         self.data_path = Path(ClearmlDataset.get(dataset_name=self.cfg.dataset_name).get_local_copy())
 
     def setup(self, stage: str):
+        if self.data_path is None:
+            raise ValueError('Must call `prepare_data` before `setup`.')
         if stage == 'fit':
-            all_data = VOCSegmentationBase(str(self.data_path / 'train'), transform=self._train_transforms)
+            all_data = VOCHumanBodyPart(
+                str(self.data_path),
+                image_list=self.data_path / 'pascal_person_part' / 'pascal_person_part_trainval_list' / 'train.txt',
+                transform=self._train_transforms,
+            )
             train_split = int(len(all_data) * self.cfg.data_split[0])
             val_split = len(all_data) - train_split
             self.data_train, self.data_val = torch.utils.data.random_split(  # noqa: WPS414
                 all_data,
                 [train_split, val_split],
             )
-            self.data_val.transform = self._valid_transforms
+            self.data_val.transform = self._valid_transforms  # type: ignore
         elif stage == 'test':
-            self.data_test = VOCSegmentationBase(str(self.data_path / 'test'), transform=self._valid_transforms)
+            self.data_test = VOCHumanBodyPart(
+                str(self.data_path),
+                transform=self._valid_transforms,
+                image_list=self.data_path
+                / 'pascal_person_part'
+                / 'pascal_person_part_trainval_list'
+                / 'val.txt',  # FIXME merge train/val/test datasets and re-split them
+                cache_size=0,
+            )
         self.initialized = True
 
     def train_dataloader(self) -> DataLoader:

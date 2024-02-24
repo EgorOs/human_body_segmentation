@@ -18,7 +18,7 @@ class DataConfig(_BaseValidatedConfig):
     num_workers: int = 0
     pin_memory: bool = True
 
-    @model_validator(mode='after')
+    @model_validator(mode='after')  # type: ignore
     def splits_add_up_to_one(self) -> 'DataConfig':
         epsilon = 1e-5
         total = sum(self.data_split)

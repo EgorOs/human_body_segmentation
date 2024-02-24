@@ -1,32 +1,38 @@
-from typing import Dict, List
+from typing import Any, Dict, List
 
+import segmentation_models_pytorch as smp
 import torch
-import torch.nn.functional as func
 from lightning import LightningModule
+from segmentation_models_pytorch.losses._functional import (  # noqa: WPS436
+    focal_loss_with_logits,
+    soft_dice_score,
+)
 from torch import Tensor
 from torchmetrics import MeanMetric
 
 from src.metrics import get_metrics
-from src.model import CNN
 from src.schedulers import get_cosine_schedule_with_warmup
 
 
-class ClassificationLightningModule(LightningModule):  # noqa: WPS214
+class SegmentationLightningModule(LightningModule):  # noqa: WPS214
     def __init__(self, class_to_idx: Dict[str, int]):
         super().__init__()
         self._train_loss = MeanMetric()
         self._valid_loss = MeanMetric()
 
         metrics = get_metrics(
-            num_classes=len(class_to_idx),
-            num_labels=len(class_to_idx),
-            task='multiclass',
-            average='macro',
+            num_classes=None,
+            multiclass=True,
+            threshold=0.5,
         )
         self._valid_metrics = metrics.clone(prefix='valid_')
         self._test_metrics = metrics.clone(prefix='test_')
 
-        self.model = CNN()
+        self.model = smp.create_model(
+            arch='FPN',
+            encoder_name='efficientnet-b0',
+            classes=len(class_to_idx),
+        )  # FIXME parametrize
 
         self.save_hyperparameters()
 
@@ -36,9 +42,8 @@ class ClassificationLightningModule(LightningModule):  # noqa: WPS214
     def training_step(self, batch: List[Tensor]) -> Dict[str, Tensor]:  # noqa: WPS210
         images, targets = batch
         logits = self(images)
-        loss = func.cross_entropy(logits, targets)
+        loss = self.calculate_loss(logits, targets, prefix='train')
         self._train_loss(loss)
-        self.log('step_loss', loss, on_step=True, prog_bar=True, logger=True)
         return {'loss': loss}
 
     def on_train_epoch_end(self) -> None:
@@ -48,9 +53,9 @@ class ClassificationLightningModule(LightningModule):  # noqa: WPS214
     def validation_step(self, batch: List[Tensor], batch_idx: int) -> None:
         images, targets = batch
         logits = self(images)
-        self._valid_loss(func.cross_entropy(logits, targets))
+        self._valid_loss(self.calculate_loss(logits, targets, prefix='valid'))
 
-        self._valid_metrics(logits, targets)
+        self._valid_metrics(logits, targets.to(torch.int32))
 
     def on_validation_epoch_end(self) -> None:
         self.log('mean_valid_loss', self._valid_loss.compute(), on_step=False, prog_bar=True, on_epoch=True)
@@ -64,19 +69,19 @@ class ClassificationLightningModule(LightningModule):  # noqa: WPS214
         logits = self(images)
 
         preds = torch.argmax(logits, dim=1)
-        self._test_metrics(logits, targets)
+        self._test_metrics(logits, targets.to(torch.int32))
         return preds
 
     def on_test_epoch_end(self) -> None:
         self.log_dict(self._test_metrics.compute(), prog_bar=True, on_epoch=True)
         self._test_metrics.reset()
 
-    def configure_optimizers(self) -> dict:
+    def configure_optimizers(self) -> Dict[str, Any]:
         # TODO: parametrize optimizer and lr scheduler.
-        optimizer = torch.optim.SGD(self.model.parameters(), lr=2e-3)  # noqa: WPS432 will be parametrized
+        optimizer = torch.optim.AdamW(self.model.parameters(), lr=3e-4)  # noqa: WPS432 will be parametrized
         scheduler = get_cosine_schedule_with_warmup(
             optimizer,
-            num_warmup_steps=200,  # noqa: WPS432 will be parametrized
+            num_warmup_steps=10,  # noqa: WPS432 will be parametrized
             num_training_steps=self.trainer.estimated_stepping_batches,
             num_cycles=0.4,  # noqa: WPS432 will be parametrized
         )
@@ -88,3 +93,13 @@ class ClassificationLightningModule(LightningModule):  # noqa: WPS214
                 'frequency': 1,
             },
         }
+
+    def calculate_loss(self, logits: Tensor, targets: Tensor, prefix: str) -> Tensor:
+        probs = torch.nn.functional.sigmoid(logits)
+        losses = {
+            f'{prefix}_dice': soft_dice_score(probs, targets),
+            f'{prefix}_focal': focal_loss_with_logits(logits, targets),
+        }
+        losses[f'{prefix}_total'] = sum(loss for loss in losses.values())
+        self.log_dict(losses, prog_bar=True, on_step=True)
+        return losses[f'{prefix}_total']
