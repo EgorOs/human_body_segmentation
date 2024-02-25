@@ -1,4 +1,4 @@
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 import segmentation_models_pytorch as smp
 import torch
@@ -12,13 +12,16 @@ from torchmetrics import MeanMetric
 
 from src.metrics import get_metrics
 from src.schedulers import get_cosine_schedule_with_warmup
+from src.transform import TrainTransform, ValidTransform
 
 
 class SegmentationLightningModule(LightningModule):  # noqa: WPS214
-    def __init__(self, class_to_idx: Dict[str, int]):
+    def __init__(self, class_to_idx: Dict[str, int], img_size: Tuple[int, int]):
         super().__init__()
         self._train_loss = MeanMetric()
         self._valid_loss = MeanMetric()
+        self.train_transform: torch.nn.Module = TrainTransform(*img_size)
+        self.valid_transform: torch.nn.Module = ValidTransform(*img_size)
 
         metrics = get_metrics(
             num_classes=None,
@@ -38,6 +41,22 @@ class SegmentationLightningModule(LightningModule):  # noqa: WPS214
 
     def forward(self, images: Tensor) -> Tensor:
         return self.model(images)
+
+    def on_after_batch_transfer(self, batch: List[Tensor], dataloader_idx: int) -> Tuple[Tensor, Tensor]:
+        orig_dtype = batch[0].dtype
+        images, targets = batch
+        transform = self.train_transform if self.trainer.training else self.valid_transform
+
+        # perform GPU/Batched data augmentation
+        images, targets = transform(
+            images.double(),
+            targets.double(),
+        )
+
+        return (
+            images.to(orig_dtype),
+            targets.to(orig_dtype),
+        )
 
     def training_step(self, batch: List[Tensor]) -> Dict[str, Tensor]:  # noqa: WPS210
         images, targets = batch
@@ -97,9 +116,9 @@ class SegmentationLightningModule(LightningModule):  # noqa: WPS214
     def calculate_loss(self, logits: Tensor, targets: Tensor, prefix: str) -> Tensor:
         probs = torch.nn.functional.sigmoid(logits)
         losses = {
-            f'{prefix}_dice': soft_dice_score(probs, targets),
-            f'{prefix}_focal': focal_loss_with_logits(logits, targets),
+            f'{prefix}_dice_loss': soft_dice_score(probs, targets),
+            f'{prefix}_focal_loss': focal_loss_with_logits(logits, targets),
         }
-        losses[f'{prefix}_total'] = sum(loss for loss in losses.values())
-        self.log_dict(losses, prog_bar=True, on_step=True)
-        return losses[f'{prefix}_total']
+        losses[f'{prefix}_total_loss'] = sum(loss for loss in losses.values())
+        self.log_dict(losses, prog_bar=True, on_epoch=True)
+        return losses[f'{prefix}_total_loss']

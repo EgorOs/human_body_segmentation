@@ -1,16 +1,15 @@
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Sequence, Tuple
 
 import imageio
 import jpeg4py as jpeg
 import numpy as np
 import torch
+from kornia import image_to_tensor
+from kornia.geometry import resize as korn_resize
 from numpy.typing import NDArray
 from torch import Tensor
 from torch.utils.data import Dataset
-
-if TYPE_CHECKING:
-    import albumentations as albu
 
 
 class VOCSegmentationBase(Dataset):
@@ -38,11 +37,11 @@ class VOCSegmentationBase(Dataset):
         self,
         root: str | Path,
         image_list: str | Path,
-        transform: Optional['albu.Compose'] = None,
+        size: Tuple[int, int],
         cache_size: int = 0,
     ):
         self.root = Path(root)
-        self.transform = transform
+        self.size = size
         self.cache_size = cache_size
         self._data_cache: Dict[int, Any] = {}
 
@@ -100,16 +99,16 @@ class VOCSegmentationBase(Dataset):
         else:
             img = jpeg.JPEG(self.images[idx]).decode()
             target = imageio.v3.imread(self.targets[idx])
-            masks = colored_mask_to_layers(target, self.color2idx)
+            masks = rgb_to_one_hot(target, list(self.color2idx.keys()))
             if len(self._data_cache) < self.cache_size:
                 self._data_cache[idx] = (img, masks)
 
-        if self.transform is None:
-            raise ValueError('At least numpy array to tensor transformation should be defined.')
+        img = image_to_tensor(img, keepdim=False).to(torch.float32) / 255  # noqa: WPS432
+        masks = image_to_tensor(masks, keepdim=False)
 
-        transformed = self.transform(image=img, masks=masks)
-        masks_as_tensor = torch.stack(transformed['masks']).squeeze()
-        return transformed['image'], masks_as_tensor
+        img = korn_resize(img, self.size)  # FIXME, run resizing on GPU
+        masks = korn_resize(masks, self.size, interpolation='nearest')
+        return img.squeeze(), masks.squeeze()
 
 
 class VOCHumanBodyPart(VOCSegmentationBase):
@@ -118,23 +117,12 @@ class VOCHumanBodyPart(VOCSegmentationBase):
         return self.root / 'pascal_person_part' / 'pascal_person_part_gt'
 
 
-def colored_mask_to_layers(
-    mask: NDArray[np.uint8],
-    color2idx: Dict[Tuple[int, int, int], int],
-) -> List[NDArray[np.uint8]]:
-    unique_colors = np.unique(
-        mask.reshape(-1, mask.shape[2]),
-        axis=0,
-    )
-
-    if len(unique_colors) > len(color2idx):
-        raise ValueError('Number of classes on image exceeded number of classes in dataset')
-
-    idx2layer = _make_idx2layer(mask, color2idx)
-    masks = []
-    for idx in range(len(color2idx)):  # noqa: WPS518
-        masks.append(idx2layer[idx])
-    return masks
+def rgb_to_one_hot(
+    mask_rgb: NDArray[np.uint8],
+    pixel_values: Sequence[Tuple[int, int, int]],
+) -> NDArray[np.uint8]:
+    boolean_masks = [(mask_rgb == color).all(axis=-1) for color in pixel_values]
+    return np.stack(boolean_masks, axis=-1).astype(np.uint8)
 
 
 def _make_idx2layer(

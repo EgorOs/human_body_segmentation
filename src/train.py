@@ -20,14 +20,14 @@ def train(cfg: ExperimentConfig):
     callbacks = [
         VisualizeBatch(every_n_epochs=5),
         LearningRateMonitor(logging_interval='step'),
-        ModelCheckpoint(save_top_k=3, monitor='valid_dice', mode='max', every_n_epochs=1),
+        ModelCheckpoint(save_top_k=3, monitor='valid_dice_metric', mode='max', every_n_epochs=1),
     ]
     if cfg.track_in_clearml:
         tracking_cb = ClearMLTracking(cfg, label_enumeration=datamodule.class_to_idx)
         callbacks += [
             tracking_cb,
         ]
-    model = SegmentationLightningModule(class_to_idx=datamodule.class_to_idx)
+    model = SegmentationLightningModule(class_to_idx=datamodule.class_to_idx, img_size=cfg.data_config.img_size)
 
     trainer = Trainer(**dict(cfg.trainer_config), callbacks=callbacks)
     trainer.fit(model=model, datamodule=datamodule)

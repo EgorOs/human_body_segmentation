@@ -19,37 +19,49 @@ class VisualizeBatch(Callback):
 
     def on_train_epoch_start(self, trainer: Trainer, pl_module: SegmentationLightningModule):  # noqa: WPS210
         if trainer.current_epoch % self.every_n_epochs == 0:
-            images, masks = next(iter(trainer.train_dataloader))
+            batch = next(iter(trainer.train_dataloader))
 
-            base_images = []
-            masked_images = []
-            for img, mask in zip(images, masks):
-                base_img = (
-                    img.mul(255)
-                    .add_(0.5)
-                    .clamp_(0, 255)
-                    .to(  # noqa: WPS221
-                        pl_module.device,
-                        torch.uint8,
-                    )
-                )
-                base_images.append(base_img)
-                rgb_mask = _tensor_mask_to_rgb(mask, VOCSegmentationBase.idx2color)
-                masked_images.append(blend_mask_with_img_tensor(base_img, rgb_mask))
+            log_batch(batch, 'Batch', trainer, pl_module)
 
-            image_grid = make_grid(base_images, normalize=False)
-            trainer.logger.experiment.add_image(
-                'Batch preview: images',
-                img_tensor=image_grid,
-                global_step=trainer.global_step,
+            transformed_batch = pl_module.on_after_batch_transfer(batch, dataloader_idx=0)
+            log_batch(transformed_batch, 'Transformed batch', trainer, pl_module)
+
+
+def log_batch(  # noqa: WPS210
+    batch: Tuple[torch.Tensor, torch.Tensor],
+    prefix: str,
+    trainer: Trainer,
+    pl_module: SegmentationLightningModule,
+) -> None:
+    images, masks = batch
+
+    base_images = []
+    masked_images = []
+    for img, mask in zip(images, masks):
+        base_img = (
+            img.mul(255)
+            .add_(0.5)
+            .clamp_(0, 255)
+            .to(  # noqa: WPS221
+                pl_module.device,
+                torch.uint8,
             )
-
-            masked_grid = make_grid(masked_images, normalize=True)
-            trainer.logger.experiment.add_image(
-                'Batch preview: masked',
-                img_tensor=masked_grid,
-                global_step=trainer.global_step,
-            )
+        )
+        base_images.append(base_img)
+        rgb_mask = _tensor_mask_to_rgb(mask, VOCSegmentationBase.idx2color)
+        masked_images.append(blend_mask_with_img_tensor(base_img, rgb_mask))
+    image_grid = make_grid(base_images, normalize=False)
+    trainer.logger.experiment.add_image(
+        f'{prefix}: images',
+        img_tensor=image_grid,
+        global_step=trainer.global_step,
+    )
+    masked_grid = make_grid(masked_images, normalize=True)
+    trainer.logger.experiment.add_image(
+        f'{prefix}: masked',
+        img_tensor=masked_grid,
+        global_step=trainer.global_step,
+    )
 
 
 def _tensor_mask_to_rgb(
