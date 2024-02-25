@@ -13,10 +13,6 @@ NORMALIZE = korn.Normalize(
 )
 
 
-def get_train_transforms(img_width: int, img_height: int) -> korn.AugmentationSequential:
-    return TrainTransform(img_width, img_height)
-
-
 class TrainTransform(nn.Module):
     def __init__(self, img_width: int, img_height: int):
         super().__init__()
@@ -25,8 +21,9 @@ class TrainTransform(nn.Module):
 
         self.appearance = korn.AugmentationSequential(
             korn.ColorJitter(0.2, 0.3, 0.2, 0.2, p=0.3),
+            korn.RandomClahe(p=0.2),
             korn.RandomBoxBlur((3, 3), p=0.2),
-            korn.RandomHue(hue=(-0.5, 0.5), p=0.1),
+            korn.RandomHue(hue=(-0.3, 0.3), p=0.1),
             NORMALIZE,
         )
 
@@ -35,7 +32,8 @@ class TrainTransform(nn.Module):
     def create_geometry_augmentations(self, resample: kornia.constants.Resample) -> korn.AugmentationSequential:
         return korn.AugmentationSequential(
             korn.RandomHorizontalFlip(p=0.5),
-            korn.RandomRotation(degrees=(-5, 5), resample=resample, p=0.5),
+            korn.RandomPerspective(distortion_scale=0.3, resample=resample, p=0.3),
+            korn.RandomRotation(degrees=(-7, 7), resample=resample, p=0.5),
             korn.RandomResizedCrop(
                 size=(self.img_width, self.img_height),
                 resample=resample,
