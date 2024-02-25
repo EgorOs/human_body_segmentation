@@ -5,7 +5,6 @@ import torch
 from lightning import LightningModule
 from segmentation_models_pytorch.losses._functional import (  # noqa: WPS436
     focal_loss_with_logits,
-    soft_dice_score,
 )
 from torch import Tensor
 from torchmetrics import MeanMetric
@@ -74,7 +73,9 @@ class SegmentationLightningModule(LightningModule):  # noqa: WPS214
         logits = self(images)
         self._valid_loss(self.calculate_loss(logits, targets, prefix='valid'))
 
-        self._valid_metrics(logits, targets.to(torch.int32))
+        probs = logits_to_prob(logits)
+        self._valid_metrics(probs, targets.to(torch.int32))
+        return probs
 
     def on_validation_epoch_end(self) -> None:
         self.log('mean_valid_loss', self._valid_loss.compute(), on_step=False, prog_bar=True, on_epoch=True)
@@ -87,9 +88,9 @@ class SegmentationLightningModule(LightningModule):  # noqa: WPS214
         images, targets = batch
         logits = self(images)
 
-        preds = torch.argmax(logits, dim=1)
+        probs = logits_to_prob(logits)
         self._test_metrics(logits, targets.to(torch.int32))
-        return preds
+        return probs
 
     def on_test_epoch_end(self) -> None:
         self.log_dict(self._test_metrics.compute(), prog_bar=True, on_epoch=True)
@@ -102,7 +103,7 @@ class SegmentationLightningModule(LightningModule):  # noqa: WPS214
             optimizer,
             num_warmup_steps=10,  # noqa: WPS432 will be parametrized
             num_training_steps=self.trainer.estimated_stepping_batches,
-            num_cycles=0.4,  # noqa: WPS432 will be parametrized
+            num_cycles=1.8,  # noqa: WPS432 will be parametrized
         )
         return {
             'optimizer': optimizer,
@@ -114,11 +115,20 @@ class SegmentationLightningModule(LightningModule):  # noqa: WPS214
         }
 
     def calculate_loss(self, logits: Tensor, targets: Tensor, prefix: str) -> Tensor:
-        probs = torch.nn.functional.sigmoid(logits)
         losses = {
-            f'{prefix}_dice_loss': soft_dice_score(probs, targets),
+            # FIXME: DICE loss for some reason causes mask to be inverted
             f'{prefix}_focal_loss': focal_loss_with_logits(logits, targets),
         }
         losses[f'{prefix}_total_loss'] = sum(loss for loss in losses.values())
         self.log_dict(losses, prog_bar=True, on_epoch=True)
         return losses[f'{prefix}_total_loss']
+
+
+def prob_to_mask(prob: Tensor, threshold: float) -> Tensor:
+    mask = torch.zeros_like(prob, device=prob.device)
+    mask[torch.where(prob > threshold)] = 1
+    return mask
+
+
+def logits_to_prob(logits: Tensor) -> Tensor:
+    return torch.nn.functional.softmax(logits, dim=1)

@@ -23,3 +23,4 @@ data_config:
   - 0.2
   num_workers: 10
   pin_memory: true
+  prefetch_factor: 3

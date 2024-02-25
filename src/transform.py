@@ -13,6 +13,14 @@ NORMALIZE = korn.Normalize(
 )
 
 
+DENORMALIZE = korn.Denormalize(
+    mean=torch.tensor([0.485, 0.456, 0.406]),
+    std=torch.tensor(
+        [0.229, 0.224, 0.225],
+    ),
+)
+
+
 class TrainTransform(nn.Module):
     def __init__(self, img_width: int, img_height: int):
         super().__init__()

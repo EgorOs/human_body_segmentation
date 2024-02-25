@@ -88,6 +88,7 @@ class HumanBodyDataModule(LightningDataModule):  # noqa: WPS214
             num_workers=self.cfg.num_workers,
             pin_memory=self.cfg.pin_memory,
             shuffle=False,
+            prefetch_factor=self.cfg.prefetch_factor,
         )
 
     def test_dataloader(self) -> DataLoader:

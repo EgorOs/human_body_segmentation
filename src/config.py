@@ -17,6 +17,7 @@ class DataConfig(_BaseValidatedConfig):
     data_split: Tuple[float, ...] = (0.7, 0.2, 0.1)
     num_workers: int = 0
     pin_memory: bool = True
+    prefetch_factor: int = 2
 
     @model_validator(mode='after')  # type: ignore
     def splits_add_up_to_one(self) -> 'DataConfig':
