@@ -19,9 +19,14 @@ def train(cfg: ExperimentConfig):
     datamodule.prepare_data()
 
     callbacks = [
-        VisualizeBatch(every_n_epochs=10),
+        VisualizeBatch(every_n_epochs=100),
         VisualizePredictions(
             threshold=0.5,
+            idx_to_drop_bg=0,
+            colors=list(VOCSegmentationBase.idx2color.values()),
+        ),  # Fixme parametrize
+        VisualizePredictions(
+            threshold=0.3,  # noqa: WPS432
             idx_to_drop_bg=0,
             colors=list(VOCSegmentationBase.idx2color.values()),
         ),  # Fixme parametrize

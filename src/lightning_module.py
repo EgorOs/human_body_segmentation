@@ -98,10 +98,10 @@ class SegmentationLightningModule(LightningModule):  # noqa: WPS214
 
     def configure_optimizers(self) -> Dict[str, Any]:
         # TODO: parametrize optimizer and lr scheduler.
-        optimizer = torch.optim.AdamW(self.model.parameters(), lr=3e-4)  # noqa: WPS432 will be parametrized
+        optimizer = torch.optim.AdamW(self.model.parameters(), lr=1e-3)  # noqa: WPS432 will be parametrized
         scheduler = get_cosine_schedule_with_warmup(
             optimizer,
-            num_warmup_steps=10,  # noqa: WPS432 will be parametrized
+            num_warmup_steps=30,  # noqa: WPS432 will be parametrized
             num_training_steps=self.trainer.estimated_stepping_batches,
             num_cycles=1.8,  # noqa: WPS432 will be parametrized
         )

@@ -81,7 +81,7 @@ class VisualizePredictions(Callback):
             )
         image_grid = make_grid(visualizations, normalize=False)
         trainer.logger.experiment.add_image(
-            'Predictions',
+            f'Predictions at {self.threshold}',
             img_tensor=image_grid,
             global_step=trainer.global_step,
         )
