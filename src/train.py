@@ -38,7 +38,11 @@ def train(cfg: ExperimentConfig):
         callbacks += [
             tracking_cb,
         ]
-    model = SegmentationLightningModule(class_to_idx=datamodule.class_to_idx, img_size=cfg.data_config.img_size)
+    model = SegmentationLightningModule(
+        class_to_idx=datamodule.class_to_idx,
+        img_size=cfg.data_config.img_size,
+        cfg=cfg.module_config,
+    )
 
     trainer = Trainer(**dict(cfg.trainer_config), callbacks=callbacks)
     trainer.fit(model=model, datamodule=datamodule)

@@ -9,14 +9,15 @@ from segmentation_models_pytorch.losses._functional import (  # noqa: WPS436
 from torch import Tensor
 from torchmetrics import MeanMetric
 
+from src.config import ModuleConfig
 from src.metrics import get_metrics
-from src.schedulers import get_cosine_schedule_with_warmup
 from src.transform import TrainTransform, ValidTransform
 
 
 class SegmentationLightningModule(LightningModule):  # noqa: WPS214
-    def __init__(self, class_to_idx: Dict[str, int], img_size: Tuple[int, int]):
+    def __init__(self, class_to_idx: Dict[str, int], img_size: Tuple[int, int], cfg: ModuleConfig):
         super().__init__()
+        self.cfg = cfg
         self._train_loss = MeanMetric()
         self._valid_loss = MeanMetric()
         self.train_transform: torch.nn.Module = TrainTransform(*img_size)
@@ -31,10 +32,9 @@ class SegmentationLightningModule(LightningModule):  # noqa: WPS214
         self._test_metrics = metrics.clone(prefix='test_')
 
         self.model = smp.create_model(
-            arch='FPN',
-            encoder_name='efficientnet-b0',
             classes=len(class_to_idx),
-        )  # FIXME parametrize
+            **self.cfg.segm_kwargs,
+        )
 
         self.save_hyperparameters()
 
@@ -68,7 +68,7 @@ class SegmentationLightningModule(LightningModule):  # noqa: WPS214
         self.log('mean_train_loss', self._train_loss.compute(), on_step=False, prog_bar=True, on_epoch=True)
         self._train_loss.reset()
 
-    def validation_step(self, batch: List[Tensor], batch_idx: int) -> None:
+    def validation_step(self, batch: List[Tensor], batch_idx: int) -> Tensor:
         images, targets = batch
         logits = self(images)
         self._valid_loss(self.calculate_loss(logits, targets, prefix='valid'))
@@ -97,13 +97,10 @@ class SegmentationLightningModule(LightningModule):  # noqa: WPS214
         self._test_metrics.reset()
 
     def configure_optimizers(self) -> Dict[str, Any]:
-        # TODO: parametrize optimizer and lr scheduler.
-        optimizer = torch.optim.AdamW(self.model.parameters(), lr=1e-3)  # noqa: WPS432 will be parametrized
-        scheduler = get_cosine_schedule_with_warmup(
-            optimizer,
-            num_warmup_steps=30,  # noqa: WPS432 will be parametrized
+        optimizer = self.cfg.optimizer.instantiate(params=self.model.parameters())
+        scheduler = self.cfg.scheduler.instantiate(
+            optimizer=optimizer,
             num_training_steps=self.trainer.estimated_stepping_batches,
-            num_cycles=1.8,  # noqa: WPS432 will be parametrized
         )
         return {
             'optimizer': optimizer,

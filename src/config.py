@@ -1,9 +1,11 @@
 from pathlib import Path
-from typing import Literal, Optional, Tuple, Union
+from typing import Any, Dict, Literal, Optional, Tuple, Union
 
 import yaml
 from omegaconf import OmegaConf
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from src.deserialization import load_object
 
 
 class _BaseValidatedConfig(BaseModel):
@@ -26,6 +28,34 @@ class DataConfig(_BaseValidatedConfig):
         if abs(total - 1) > epsilon:
             raise ValueError(f'Splits should add up to 1, got {total}.')
         return self
+
+
+class ObjToInit(_BaseValidatedConfig):
+    target: str
+    kwargs: Dict[str, Any] = Field(default_factory=dict)
+
+    def instantiate(self, **kwargs: Any) -> Any:
+        merged_kwargs = self.kwargs | kwargs
+        return load_object(self.target)(**merged_kwargs)
+
+
+class ModuleConfig(_BaseValidatedConfig):
+    segm_kwargs: Dict[str, Any] = Field(
+        default={
+            'arch': 'FPN',
+            'encoder_name': 'efficientnet-b0',
+        },
+    )
+    optimizer: ObjToInit = Field(default=ObjToInit(target='torch.optim.AdamW', kwargs={'lr': 1e-3}))
+    scheduler: ObjToInit = Field(
+        default=ObjToInit(
+            target='src.schedulers.get_cosine_schedule_with_warmup',
+            kwargs={
+                'num_warmup_steps': 30,
+                'num_cycles': 1.8,
+            },
+        ),
+    )
 
 
 class TrainerConfig(_BaseValidatedConfig):
@@ -56,6 +86,7 @@ class ExperimentConfig(_BaseValidatedConfig):
     track_in_clearml: bool = True
     trainer_config: TrainerConfig = Field(default=TrainerConfig())
     data_config: DataConfig = Field(default=DataConfig())
+    module_config: ModuleConfig = Field(default=ModuleConfig())
 
     @classmethod
     def from_yaml(cls, path: Union[str, Path]) -> 'ExperimentConfig':

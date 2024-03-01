@@ -1,6 +1,6 @@
 project_name: human_body_segmentation
 experiment_name: segmentation_baseline
-track_in_clearml: true
+track_in_clearml: false
 trainer_config:
   min_epochs: 7
   max_epochs: 50
@@ -24,3 +24,16 @@ data_config:
   num_workers: 10
   pin_memory: true
   prefetch_factor: 3
+module_config:
+  segm_kwargs:
+    arch: FPN
+    encoder_name: efficientnet-b0
+  optimizer:
+    target: torch.optim.AdamW
+    kwargs:
+      lr: 1e-3
+  scheduler:
+    target: src.schedulers.get_cosine_schedule_with_warmup
+    kwargs:
+      num_warmup_steps: 30
+      num_cycles: 1.8
