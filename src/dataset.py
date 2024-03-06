@@ -1,6 +1,6 @@
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Sequence, Tuple
+from typing import Dict, List, Literal, Sequence, Tuple
 
 import imageio
 import jpeg4py as jpeg
@@ -29,12 +29,9 @@ class SegmentationBaseDataset(Dataset):
         self,
         root: str | Path,
         size: Tuple[int, int],
-        cache_size: int = 0,
     ):
         self.root = Path(root)
         self.size = size
-        self.cache_size = cache_size
-        self._data_cache: Dict[int, Any] = {}
         self.images: List[Path] = []
         self.targets: List[Path] = []
 
@@ -62,32 +59,23 @@ class SegmentationBaseDataset(Dataset):
         subset = deepcopy(self)
         subset.images = [self.images[idx] for idx in indexes]
         subset.targets = [self.targets[idx] for idx in indexes]
-        subset._data_cache = {}  # noqa: WPS437
         return subset
 
     def __len__(self) -> int:
         return len(self.images)
 
     def __getitem__(self, idx: int) -> Tuple[Tensor, Tensor]:
-        cached_items = self._data_cache.get(idx)
+        try:
+            img = jpeg.JPEG(self.images[idx]).decode()
+        except JPEGRuntimeError:
+            LOGGER.warning('Could not decode image %s, retrying with "imageio"', self.images[idx])
+            img = imageio.v3.imread(self.images[idx])
 
-        if cached_items:
-            img, masks = cached_items
-        else:
-            try:
-                img = jpeg.JPEG(self.images[idx]).decode()
-            except JPEGRuntimeError:
-                LOGGER.warning('Could not decode image %s, retrying with "imageio"', self.images[idx])
-                img = imageio.v3.imread(self.images[idx])
+        target = imageio.v3.imread(self.targets[idx])
+        masks = rgb_to_one_hot(target, list(self.color2idx.keys()))
 
-            target = imageio.v3.imread(self.targets[idx])
-            masks = rgb_to_one_hot(target, list(self.color2idx.keys()))
-
-            img = image_to_tensor(img, keepdim=False).to(torch.float32) / 255  # noqa: WPS432
-            masks = image_to_tensor(masks, keepdim=False)
-
-            if len(self._data_cache) < self.cache_size:
-                self._data_cache[idx] = (img, masks)
+        img = image_to_tensor(img, keepdim=False).to(torch.float32) / 255  # noqa: WPS432
+        masks = image_to_tensor(masks, keepdim=False)
 
         return img.squeeze(), masks.squeeze()
 
@@ -118,14 +106,11 @@ class VOCSegmentationBase(SegmentationBaseDataset):
         root: str | Path,
         image_list: str | Path,
         size: Tuple[int, int],
-        cache_size: int = 0,
     ):
         super().__init__(root=root, size=size)
 
         self.root = Path(root)
         self.size = size
-        self.cache_size = cache_size
-        self._data_cache: Dict[int, Any] = {}
 
         img_tgt = _get_img_tgt_pairs(Path(image_list))
         self.images = [
@@ -214,9 +199,8 @@ class VITONHDSegmentation(SegmentationBaseDataset):
         root: str | Path,
         size: Tuple[int, int],
         subset: Literal['train', 'test'],
-        cache_size: int = 0,
     ):
-        super().__init__(root=root, size=size, cache_size=cache_size)
+        super().__init__(root=root, size=size)
 
         self.root = Path(root)
         self.size = size

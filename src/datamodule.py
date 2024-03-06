@@ -70,7 +70,6 @@ class HumanBodyDataModule(LightningDataModule):  # noqa: WPS214
                 str(self.data_path),
                 size=self.cfg.img_size,
                 subset='train',
-                cache_size=0,
             )
             train_split = int(len(all_data) * self.cfg.data_split[0])
 
@@ -85,7 +84,6 @@ class HumanBodyDataModule(LightningDataModule):  # noqa: WPS214
                 str(self.data_path),
                 size=self.cfg.img_size,
                 subset='test',
-                cache_size=0,
             )
         self.initialized = True
 
@@ -96,7 +94,6 @@ class HumanBodyDataModule(LightningDataModule):  # noqa: WPS214
             num_workers=self.cfg.num_workers,
             pin_memory=self.cfg.pin_memory,
             shuffle=True,
-            persistent_workers=True,  # For cache to work
         )
 
     def val_dataloader(self) -> DataLoader:
@@ -107,7 +104,6 @@ class HumanBodyDataModule(LightningDataModule):  # noqa: WPS214
             pin_memory=self.cfg.pin_memory,
             shuffle=False,
             prefetch_factor=self.cfg.prefetch_factor,
-            persistent_workers=True,  # For cache to work
         )
 
     def test_dataloader(self) -> DataLoader:
@@ -117,5 +113,4 @@ class HumanBodyDataModule(LightningDataModule):  # noqa: WPS214
             num_workers=self.cfg.num_workers,
             pin_memory=self.cfg.pin_memory,
             shuffle=False,
-            persistent_workers=True,  # For cache to work
         )
