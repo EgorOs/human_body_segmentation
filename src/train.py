@@ -9,7 +9,6 @@ from src.callbacks.experiment_tracking import ClearMLTracking
 from src.config import ExperimentConfig
 from src.constants import PROJECT_ROOT
 from src.datamodule import HumanBodyDataModule
-from src.dataset import VOCSegmentationBase
 from src.lightning_module import SegmentationLightningModule
 
 
@@ -23,12 +22,10 @@ def train(cfg: ExperimentConfig):
         VisualizePredictions(
             threshold=0.5,
             idx_to_drop_bg=0,
-            colors=list(VOCSegmentationBase.idx2color.values()),
         ),  # Fixme parametrize
         VisualizePredictions(
             threshold=0.3,  # noqa: WPS432
             idx_to_drop_bg=0,
-            colors=list(VOCSegmentationBase.idx2color.values()),
         ),  # Fixme parametrize
         LearningRateMonitor(logging_interval='step'),
         ModelCheckpoint(save_top_k=3, monitor='valid_dice_metric', mode='max', every_n_epochs=1),

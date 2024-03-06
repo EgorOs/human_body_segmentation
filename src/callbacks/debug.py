@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 import albumentations as albu
 import numpy as np
@@ -8,7 +8,6 @@ from lightning import Callback, Trainer
 from numpy.typing import NDArray
 from torchvision.utils import draw_segmentation_masks, make_grid
 
-from src.dataset import VOCSegmentationBase
 from src.lightning_module import SegmentationLightningModule, prob_to_mask
 from src.transform import DENORMALIZE
 
@@ -32,16 +31,13 @@ class VisualizePredictions(Callback):
     def __init__(  # noqa: WPS234
         self,
         threshold: float,
-        colors: Optional[List[Tuple[int, ...]]] = None,
+        mask_alpha: float = 0.75,
         idx_to_drop_bg: Optional[int] = None,
     ):
         super().__init__()
         self.threshold = threshold
-        self.colors = colors
+        self.mask_alpha = mask_alpha
         self.idx_to_drop_bg = idx_to_drop_bg
-
-        if idx_to_drop_bg is not None and self.colors is not None:
-            self.colors.pop(idx_to_drop_bg)
 
         self.done_logging: bool = False
 
@@ -56,6 +52,11 @@ class VisualizePredictions(Callback):
     ) -> None:
         if self.done_logging:
             return
+
+        try:
+            colors = list(trainer.train_dataloader.dataset.idx2color.values())
+        except AttributeError:
+            colors = None
 
         images = batch[0]
         masks = prob_to_mask(outputs, threshold=self.threshold)
@@ -75,8 +76,8 @@ class VisualizePredictions(Callback):
                     )
                     .cpu(),
                     mask.to(torch.bool).cpu(),
-                    alpha=0.75,
-                    colors=self.colors,
+                    alpha=self.mask_alpha,
+                    colors=colors,
                 ),
             )
         image_grid = make_grid(visualizations, normalize=False)
@@ -99,6 +100,7 @@ def log_batch(  # noqa: WPS210
     denormalize: bool = False,
 ) -> None:
     images, masks = batch
+    idx2color = trainer.train_dataloader.dataset.idx2color
 
     base_images = []
     masked_images = []
@@ -115,7 +117,7 @@ def log_batch(  # noqa: WPS210
             )
         )
         base_images.append(base_img)
-        rgb_mask = _tensor_mask_to_rgb(mask, VOCSegmentationBase.idx2color)
+        rgb_mask = _tensor_mask_to_rgb(mask, idx2color)
         masked_images.append(blend_mask_with_img_tensor(base_img, rgb_mask))
     image_grid = make_grid(base_images, normalize=False)
     trainer.logger.experiment.add_image(
@@ -123,7 +125,7 @@ def log_batch(  # noqa: WPS210
         img_tensor=image_grid,
         global_step=trainer.global_step,
     )
-    masked_grid = make_grid(masked_images, normalize=True)
+    masked_grid = make_grid(masked_images, normalize=False)
     trainer.logger.experiment.add_image(
         f'{prefix}: masked',
         img_tensor=masked_grid,
@@ -135,6 +137,9 @@ def _tensor_mask_to_rgb(
     mask: torch.Tensor,
     idx2color: Dict[int, Tuple[int, int, int]],
 ) -> NDArray[np.uint8]:
+    if len(idx2color) < mask.shape[0]:
+        raise ValueError('Number of colors is smaller than number of classes in segmentation mask.')
+
     arr = mask.permute(1, 2, 0).cpu().numpy()
     rgb_mask = np.zeros_like(arr)[:, :, :3]
     for idx, color in idx2color.items():
@@ -145,9 +150,12 @@ def _tensor_mask_to_rgb(
 def blend_mask_with_img_tensor(
     img: torch.Tensor,
     mask: NDArray[np.uint8],
-    alpha: float = 0.3,
-    beta: float = 0.3,
+    alpha: float = 0.5,
+    beta: float = 0.5,
+    max_val: int = 255,
 ) -> torch.Tensor:
     transform = albu.Compose([ToTensorV2()])
     mask_tensor = transform(image=mask)['image'].to(img.device)
-    return alpha * img + beta * mask_tensor
+    return (max_val * (alpha * img / max_val + beta * mask_tensor / max_val)).to(  # noqa: WPS221
+        torch.uint8,
+    )

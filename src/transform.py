@@ -40,8 +40,8 @@ class TrainTransform(nn.Module):
     def create_geometry_augmentations(self, resample: kornia.constants.Resample) -> korn.AugmentationSequential:
         return korn.AugmentationSequential(
             korn.RandomHorizontalFlip(p=0.5),
-            korn.RandomPerspective(distortion_scale=0.3, resample=resample, p=0.3),
-            korn.RandomRotation(degrees=(-7, 7), resample=resample, p=0.5),
+            korn.RandomPerspective(distortion_scale=0.5, resample=resample, p=0.5),
+            korn.RandomRotation(degrees=(-10, 10), resample=resample, p=0.5),
             korn.RandomResizedCrop(
                 size=(self.img_width, self.img_height),
                 resample=resample,

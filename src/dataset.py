@@ -1,15 +1,18 @@
+from copy import deepcopy
 from pathlib import Path
-from typing import Any, Dict, List, Sequence, Tuple
+from typing import Any, Dict, List, Literal, Sequence, Tuple
 
 import imageio
 import jpeg4py as jpeg
 import numpy as np
 import torch
+from jpeg4py import JPEGRuntimeError
 from kornia import image_to_tensor
-from kornia.geometry import resize as korn_resize
 from numpy.typing import NDArray
 from torch import Tensor
 from torch.utils.data import Dataset
+
+from src.logger import LOGGER
 
 
 class SegmentationBaseDataset(Dataset):
@@ -55,6 +58,13 @@ class SegmentationBaseDataset(Dataset):
         if len(self.images) > len(self.targets):
             raise ValueError(f'Data mismatch {len(self.images)=}, {len(self.targets)=}.')  # noqa: WPS237, WPS221
 
+    def get_subset(self, indexes: List[int]) -> 'SegmentationBaseDataset':
+        subset = deepcopy(self)
+        subset.images = [self.images[idx] for idx in indexes]
+        subset.targets = [self.targets[idx] for idx in indexes]
+        subset._data_cache = {}  # noqa: WPS437
+        return subset
+
     def __len__(self) -> int:
         return len(self.images)
 
@@ -64,17 +74,21 @@ class SegmentationBaseDataset(Dataset):
         if cached_items:
             img, masks = cached_items
         else:
-            img = jpeg.JPEG(self.images[idx]).decode()
+            try:
+                img = jpeg.JPEG(self.images[idx]).decode()
+            except JPEGRuntimeError:
+                LOGGER.warning('Could not decode image %s, retrying with "imageio"', self.images[idx])
+                img = imageio.v3.imread(self.images[idx])
+
             target = imageio.v3.imread(self.targets[idx])
             masks = rgb_to_one_hot(target, list(self.color2idx.keys()))
+
+            img = image_to_tensor(img, keepdim=False).to(torch.float32) / 255  # noqa: WPS432
+            masks = image_to_tensor(masks, keepdim=False)
+
             if len(self._data_cache) < self.cache_size:
                 self._data_cache[idx] = (img, masks)
 
-        img = image_to_tensor(img, keepdim=False).to(torch.float32) / 255  # noqa: WPS432
-        masks = image_to_tensor(masks, keepdim=False)
-
-        img = korn_resize(img, self.size)  # FIXME, run resizing on GPU
-        masks = korn_resize(masks, self.size, interpolation='nearest')
         return img.squeeze(), masks.squeeze()
 
 
@@ -147,14 +161,79 @@ class VOCHumanBodyPart(VOCSegmentationBase):
 
 
 class VITONHDSegmentation(SegmentationBaseDataset):
+    # Based on
+    # https://github.com/shadow2496/VITON-HD/blob/4261cd45949c93c355ca6b158bf988c49d2e4343/datasets.py#L156C9-L156C15
+    idx2class = {
+        0: 'background',
+        1: 'hair_1',
+        2: 'hair_2',
+        3: 'noise_3',
+        4: 'face_4',
+        5: 'upper_5',
+        6: 'upper_6',
+        7: 'upper_7',
+        8: 'socks',
+        9: 'bottom_9',
+        10: 'neck',
+        11: 'noise_11',
+        12: 'bottom_12',
+        13: 'face_13',
+        14: 'left_arm',
+        15: 'right_arm',
+        16: 'left_leg',
+        17: 'right_leg',
+        18: 'left_shoe',
+        19: 'right_shoe',
+    }
+
+    idx2color = {
+        0: (0, 0, 0),
+        1: (128, 0, 0),
+        2: (254, 0, 0),
+        3: (0, 85, 0),
+        4: (169, 0, 51),
+        5: (254, 85, 0),
+        6: (0, 0, 85),
+        7: (0, 119, 220),
+        8: (85, 85, 0),
+        9: (0, 85, 85),
+        10: (85, 51, 0),
+        11: (52, 86, 128),
+        12: (0, 128, 0),
+        13: (0, 0, 254),
+        14: (51, 169, 220),
+        15: (0, 254, 254),
+        16: (85, 254, 169),
+        17: (169, 254, 85),
+        18: (254, 254, 0),
+        19: (254, 169, 0),
+    }
+
+    def __init__(
+        self,
+        root: str | Path,
+        size: Tuple[int, int],
+        subset: Literal['train', 'test'],
+        cache_size: int = 0,
+    ):
+        super().__init__(root=root, size=size, cache_size=cache_size)
+
+        self.root = Path(root)
+        self.size = size
+        self.subset = subset
+
+        self.images = sorted(self.images_dir.glob('*'))
+        self.targets = sorted(self.targets_dir.glob('*'))
+
+        self.validate_data()
+
     @property
     def images_dir(self) -> Path:
-        # FIXME: parametrize 'train | test'
-        return self.root / 'train' / 'image'
+        return self.root / self.subset / 'image'
 
     @property
     def targets_dir(self) -> Path:
-        return self.root / 'train' / 'image-parse-v3'
+        return self.root / self.subset / 'image-parse-v3'
 
 
 def rgb_to_one_hot(

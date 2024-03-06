@@ -1,11 +1,11 @@
 project_name: human_body_segmentation
 experiment_name: segmentation_baseline
-track_in_clearml: false
+track_in_clearml: true
 trainer_config:
   min_epochs: 7
-  max_epochs: 50
-  check_val_every_n_epoch: 5
-  log_every_n_steps: 20
+  max_epochs: 30
+  check_val_every_n_epoch: 3
+  log_every_n_steps: 30
   gradient_clip_val: null
   gradient_clip_algorithm: null
   deterministic: false
@@ -23,7 +23,7 @@ data_config:
   - 0.2
   num_workers: 10
   pin_memory: true
-  prefetch_factor: 3
+  prefetch_factor: 2
 module_config:
   segm_kwargs:
     arch: FPN

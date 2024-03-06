@@ -1,13 +1,14 @@
+import random
 from pathlib import Path
 from typing import Dict, Optional
 
-import torch
-from clearml import Dataset as ClearmlDataset
 from lightning import LightningDataModule
 from torch.utils.data import DataLoader
 
 from src.config import DataConfig
-from src.dataset import VOCHumanBodyPart, VOCSegmentationBase
+from src.dataset import VITONHDSegmentation, VOCSegmentationBase
+from src.logger import LOGGER
+from src.preprocessing import resize_images
 
 
 class HumanBodyDataModule(LightningDataModule):  # noqa: WPS214
@@ -42,32 +43,48 @@ class HumanBodyDataModule(LightningDataModule):  # noqa: WPS214
         return {idx: cl for cl, idx in self.class_to_idx.items()}
 
     def prepare_data(self) -> None:
-        self.data_path = Path(ClearmlDataset.get(dataset_name=self.cfg.dataset_name).get_local_copy())
+        orig_data_path = Path('/home/egor/Projects/ladi-vton-triton-serving/VITON-HD')  # FIXME implement download
+
+        img_size = self.cfg.img_size
+        data_path = orig_data_path / f'{img_size[0]}x{img_size[1]}'
+
+        if data_path.is_dir():
+            LOGGER.info('Found images of the desired size at %s', data_path)
+        else:
+            LOGGER.info("Couldn't find images of the desired size at %s, resizing...", data_path)
+            for subset in ('train', 'test'):
+                resize_images(orig_data_path / subset / 'image', data_path / subset / 'image', img_size)
+                resize_images(
+                    orig_data_path / subset / 'image-parse-v3',
+                    data_path / subset / 'image-parse-v3',
+                    img_size,
+                )
+
+        self.data_path = data_path
 
     def setup(self, stage: str):
         if self.data_path is None:
             raise ValueError('Must call `prepare_data` before `setup`.')
         if stage == 'fit':
-            all_data = VOCHumanBodyPart(
+            all_data = VITONHDSegmentation(
                 str(self.data_path),
-                image_list=self.data_path / 'pascal_person_part' / 'pascal_person_part_trainval_list' / 'train.txt',
                 size=self.cfg.img_size,
+                subset='train',
                 cache_size=0,
             )
             train_split = int(len(all_data) * self.cfg.data_split[0])
-            val_split = len(all_data) - train_split
-            self.data_train, self.data_val = torch.utils.data.random_split(  # noqa: WPS414
-                all_data,
-                [train_split, val_split],
-            )
+
+            all_indexes = list(range(len(all_data)))
+            random.shuffle(all_indexes)
+
+            self.data_train = all_data.get_subset(indexes=all_indexes[:train_split])
+            self.data_val = all_data.get_subset(indexes=all_indexes[train_split:])
+
         elif stage == 'test':
-            self.data_test = VOCHumanBodyPart(
+            self.data_test = VITONHDSegmentation(
                 str(self.data_path),
                 size=self.cfg.img_size,
-                image_list=self.data_path
-                / 'pascal_person_part'
-                / 'pascal_person_part_trainval_list'
-                / 'val.txt',  # TODO merge train/val/test datasets and re-split them
+                subset='test',
                 cache_size=0,
             )
         self.initialized = True
@@ -79,6 +96,7 @@ class HumanBodyDataModule(LightningDataModule):  # noqa: WPS214
             num_workers=self.cfg.num_workers,
             pin_memory=self.cfg.pin_memory,
             shuffle=True,
+            persistent_workers=True,  # For cache to work
         )
 
     def val_dataloader(self) -> DataLoader:
@@ -89,6 +107,7 @@ class HumanBodyDataModule(LightningDataModule):  # noqa: WPS214
             pin_memory=self.cfg.pin_memory,
             shuffle=False,
             prefetch_factor=self.cfg.prefetch_factor,
+            persistent_workers=True,  # For cache to work
         )
 
     def test_dataloader(self) -> DataLoader:
@@ -98,4 +117,5 @@ class HumanBodyDataModule(LightningDataModule):  # noqa: WPS214
             num_workers=self.cfg.num_workers,
             pin_memory=self.cfg.pin_memory,
             shuffle=False,
+            persistent_workers=True,  # For cache to work
         )
