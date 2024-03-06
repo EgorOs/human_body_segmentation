@@ -12,7 +12,73 @@ from torch import Tensor
 from torch.utils.data import Dataset
 
 
-class VOCSegmentationBase(Dataset):
+class SegmentationBaseDataset(Dataset):
+    idx2class: Dict[int, str] = {
+        0: 'background',
+        1: 'some_class',
+    }
+    idx2color: Dict[int, Tuple[int, int, int]] = {
+        0: (0, 0, 0),
+        1: (128, 0, 0),
+    }
+
+    def __init__(
+        self,
+        root: str | Path,
+        size: Tuple[int, int],
+        cache_size: int = 0,
+    ):
+        self.root = Path(root)
+        self.size = size
+        self.cache_size = cache_size
+        self._data_cache: Dict[int, Any] = {}
+        self.images: List[Path] = []
+        self.targets: List[Path] = []
+
+    @property
+    def color2idx(self) -> Dict[Tuple[int, int, int], int]:
+        inverted = {col: idx for idx, col in self.idx2color.items()}
+        if len(inverted) != len(self.idx2color):
+            raise ValueError('Duplicated colors were found')
+        return inverted
+
+    @property
+    def class2idx(self) -> Dict[str, int]:
+        inverted = {cl: idx for idx, cl in self.idx2class.items()}
+        if len(inverted) != len(self.idx2class):
+            raise ValueError('Duplicated class names were found')
+        return inverted
+
+    def validate_data(self) -> None:
+        if not self.images or not self.targets:
+            raise ValueError('Missing data')
+        if len(self.images) > len(self.targets):
+            raise ValueError(f'Data mismatch {len(self.images)=}, {len(self.targets)=}.')  # noqa: WPS237, WPS221
+
+    def __len__(self) -> int:
+        return len(self.images)
+
+    def __getitem__(self, idx: int) -> Tuple[Tensor, Tensor]:
+        cached_items = self._data_cache.get(idx)
+
+        if cached_items:
+            img, masks = cached_items
+        else:
+            img = jpeg.JPEG(self.images[idx]).decode()
+            target = imageio.v3.imread(self.targets[idx])
+            masks = rgb_to_one_hot(target, list(self.color2idx.keys()))
+            if len(self._data_cache) < self.cache_size:
+                self._data_cache[idx] = (img, masks)
+
+        img = image_to_tensor(img, keepdim=False).to(torch.float32) / 255  # noqa: WPS432
+        masks = image_to_tensor(masks, keepdim=False)
+
+        img = korn_resize(img, self.size)  # FIXME, run resizing on GPU
+        masks = korn_resize(masks, self.size, interpolation='nearest')
+        return img.squeeze(), masks.squeeze()
+
+
+class VOCSegmentationBase(SegmentationBaseDataset):
     idx2class: Dict[int, str] = {
         0: 'background',
         1: 'head',
@@ -40,6 +106,8 @@ class VOCSegmentationBase(Dataset):
         size: Tuple[int, int],
         cache_size: int = 0,
     ):
+        super().__init__(root=root, size=size)
+
         self.root = Path(root)
         self.size = size
         self.cache_size = cache_size
@@ -61,10 +129,7 @@ class VOCSegmentationBase(Dataset):
             if fpath.name in {pair[1] for pair in img_tgt}
         ]
 
-        if not self.images or not self.targets:
-            raise ValueError('Missing data')
-        if len(self.images) > len(self.targets):
-            raise ValueError(f'Data mismatch {len(self.images)=}, {len(self.targets)=}.')  # noqa: WPS237, WPS221
+        self.validate_data()
 
     @property
     def images_dir(self) -> Path:
@@ -74,47 +139,22 @@ class VOCSegmentationBase(Dataset):
     def targets_dir(self) -> Path:
         return self.root / 'VOCdevkit' / 'VOC2010' / 'SegmentationClass'
 
-    @property
-    def color2idx(self) -> Dict[Tuple[int, int, int], int]:
-        inverted = {col: idx for idx, col in self.idx2color.items()}
-        if len(inverted) != len(self.idx2color):
-            raise ValueError('Duplicated colors were found')
-        return inverted
-
-    @property
-    def class2idx(self) -> Dict[str, int]:
-        inverted = {cl: idx for idx, cl in self.idx2class.items()}
-        if len(inverted) != len(self.idx2class):
-            raise ValueError('Duplicated class names were found')
-        return inverted
-
-    def __len__(self) -> int:
-        return len(self.images)
-
-    def __getitem__(self, idx: int) -> Tuple[Tensor, Tensor]:
-        cached_items = self._data_cache.get(idx)
-
-        if cached_items:
-            img, masks = cached_items
-        else:
-            img = jpeg.JPEG(self.images[idx]).decode()
-            target = imageio.v3.imread(self.targets[idx])
-            masks = rgb_to_one_hot(target, list(self.color2idx.keys()))
-            if len(self._data_cache) < self.cache_size:
-                self._data_cache[idx] = (img, masks)
-
-        img = image_to_tensor(img, keepdim=False).to(torch.float32) / 255  # noqa: WPS432
-        masks = image_to_tensor(masks, keepdim=False)
-
-        img = korn_resize(img, self.size)  # FIXME, run resizing on GPU
-        masks = korn_resize(masks, self.size, interpolation='nearest')
-        return img.squeeze(), masks.squeeze()
-
 
 class VOCHumanBodyPart(VOCSegmentationBase):
     @property
     def targets_dir(self) -> Path:
         return self.root / 'pascal_person_part' / 'pascal_person_part_gt'
+
+
+class VITONHDSegmentation(SegmentationBaseDataset):
+    @property
+    def images_dir(self) -> Path:
+        # FIXME: parametrize 'train | test'
+        return self.root / 'train' / 'image'
+
+    @property
+    def targets_dir(self) -> Path:
+        return self.root / 'train' / 'image-parse-v3'
 
 
 def rgb_to_one_hot(
