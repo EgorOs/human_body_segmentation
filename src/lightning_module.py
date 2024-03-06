@@ -5,6 +5,7 @@ import torch
 from lightning import LightningModule
 from segmentation_models_pytorch.losses._functional import (  # noqa: WPS436
     focal_loss_with_logits,
+    soft_dice_score,
 )
 from torch import Tensor
 from torchmetrics import MeanMetric
@@ -112,8 +113,10 @@ class SegmentationLightningModule(LightningModule):  # noqa: WPS214
         }
 
     def calculate_loss(self, logits: Tensor, targets: Tensor, prefix: str) -> Tensor:
+        probs = logits_to_prob(logits)
         losses = {
             # FIXME: DICE loss for some reason causes mask to be inverted
+            f'{prefix}_dice_loss': 1 - soft_dice_score(probs, targets),
             f'{prefix}_focal_loss': focal_loss_with_logits(logits, targets),
         }
         losses[f'{prefix}_total_loss'] = sum(loss for loss in losses.values())
