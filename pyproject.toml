@@ -21,6 +21,9 @@ segmentation-models-pytorch = ">=0.3.3"
 jpeg4py = "0.1.4"
 imageio = "2.34.0"
 kornia = ">=0.7.1"
+onnxsim = ">=0.4.36"
+onnx = ">=1.15.0"
+onnxruntime = ">=1.17.1"
 
 [tool.poetry.group.dev.dependencies]
 pre-commit = ">=3.2.1"
