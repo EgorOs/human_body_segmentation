@@ -42,6 +42,8 @@ class TrainTransform(nn.Module):
             korn.RandomHorizontalFlip(p=0.5),
             korn.RandomPerspective(distortion_scale=0.5, resample=resample, p=0.5),
             korn.RandomRotation(degrees=(-10, 10), resample=resample, p=0.5),
+            # TODO: not quite sure about positive effect of `RandomErasing` transformation, need to validate
+            korn.RandomErasing((0.1, 0.5), (0.3, 1 / 0.3), p=0.5),
             korn.RandomResizedCrop(
                 size=(self.img_width, self.img_height),
                 resample=resample,
