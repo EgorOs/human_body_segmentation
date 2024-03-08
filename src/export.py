@@ -23,7 +23,7 @@ def convert_onnx(  # noqa: WPS210
     logit_tolerance: float = 5e-5,
 ) -> None:
     model.eval()
-    dumpy_input = torch.randn((1, 3, input_h, input_w), dtype=torch.float32, device='cpu')
+    dumpy_input = torch.randn((12, 3, input_h, input_w), dtype=torch.float32, device='cpu')
 
     with torch.no_grad():
         ref_logits = model(dumpy_input)
@@ -46,7 +46,7 @@ def convert_onnx(  # noqa: WPS210
     model_onnx, check = onnxsim.simplify(
         model_onnx,
         dynamic_input_shape=False,
-        overwrite_input_shapes={'input': [1, 3, input_h, input_w]},
+        overwrite_input_shapes={'input': [-1, 3, input_h, input_w]},
     )
     onnx.save(model_onnx, out_path)
     LOGGER.info('simply onnx model')
